@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OPTIC-LINK // P2P CAM</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;700&display=swap');
+
+        :root {
+            --bg: #000000;
+            --panel: #0A0A0A;
+            --border: #1A1A1A;
+            --text: #FFFFFF;
+            --muted: #555555;
+            --accent: #FFFFFF;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .crt-overlay {
+            pointer-events: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 9999;
+            background-size: 100% 2px, 3px 100%;
+        }
+
+        #boot-screen {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .boot-text {
+            font-size: 12px;
+            color: var(--text);
+            opacity: 0;
+            margin: 2px 0;
+            animation: fadeIn 0.3s forwards;
+        }
+
+        @keyframes fadeIn { to { opacity: 1; } }
+
+        #app-container {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        #top-bar {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            clip-path: polygon(0 0, 100% 0, 100% 85%, 95% 100%, 0 100%);
+        }
+
+        .logo {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 2px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            font-size: 10px;
+            color: var(--muted);
+        }
+
+        .dot {
+            width: 6px;
+            height: 6px;
+            background: var(--muted);
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .dot.active { background: #FFF; animation: pulse 1.5s infinite; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+
+        #role-selector {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .role-btn {
+            width: 80%;
+            padding: 20px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: 0.2s;
+            clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+        }
+
+        .role-btn:active {
+            background: #1A1A1A;
+            transform: scale(0.98);
+        }
+
+        .role-desc {
+            font-size: 10px;
+            color: var(--muted);
+            margin-top: -8px;
+        }
+
+        .view {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+        }
+
+        .view.active { display: flex; }
+
+        .video-wrapper {
+            flex: 1;
+            position: relative;
+            background: #000;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 10px;
+            color: rgba(255,255,255,0.7);
+            background: rgba(0,0,0,0.6);
+            padding: 4px 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .context-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--panel);
+            border: 1px solid var(--border);
+            padding: 10px 20px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+            z-index: 10;
+        }
+
+        .context-input {
+            background: transparent;
+            border: none;
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            width: 180px;
+            outline: none;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 2px;
+        }
+
+        .context-btn {
+            background: transparent;
+            border: 1px solid var(--text);
+            color: var(--text);
+            padding: 6px 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .context-btn:active {
+            background: var(--text);
+            color: var(--bg);
+        }
+
+        .peer-id-display {
+            font-size: 12px;
+            color: var(--text);
+            cursor: pointer;
+            border: 1px dashed var(--muted);
+            padding: 6px 12px;
+        }
+
+        #modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            padding: 20px;
+            width: 80%;
+            max-width: 300px;
+            text-align: center;
+        }
+
+        .modal-text {
+            font-size: 12px;
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="crt-overlay"></div>
+
+    <div id="boot-screen">
+        <div class="boot-text" style="animation-delay: 0s">> INITIALIZING OPTIC-LINK...</div>
+        <div class="boot-text" style="animation-delay: 0.5s">> CHECKING WEBRTC CAPABILITIES...</div>
+        <div class="boot-text" style="animation-delay: 1.0s">> ESTABLISHING SECURE CONTEXT...</div>
+        <div class="boot-text" style="animation-delay: 1.5s">> SYSTEM READY.</div>
+    </div>
+
+    <div id="app-container">
+        <div id="top-bar">
+            <div class="logo">OPTIC-LINK</div>
+            <div class="status-indicator">
+                <div class="dot" id="conn-dot"></div>
+                <span id="conn-text">OFFLINE</span>
+            </div>
+        </div>
+
+        <div id="role-selector">
+            <button class="role-btn" onclick="initRole('transmit')">TRANSMIT</button>
+            <div class="role-desc">ANDROID DEVICE (CAMERA SOURCE)</div>
+            
+            <button class="role-btn" onclick="initRole('receive')">RECEIVE</button>
+            <div class="role-desc">PC / CLIENT (VIEWER)</div>
+        </div>
+
+        <div id="transmit-view" class="view">
+            <div class="video-wrapper">
+                <video id="local-video" autoplay playsinline muted></video>
+                <div class="video-hud">CAM-01 // LIVE</div>
+            </div>
+            <div class="context-bar">
+                <div class="peer-id-display" id="my-id-tx" onclick="copyId()">FETCHING ID...</div>
+            </div>
+        </div>
+
+        <div id="receive-view" class="view">
+            <div class="video-wrapper">
+                <video id="remote-video" autoplay playsinline></video>
+                <div class="video-hud" id="remote-hud" style="display:none;">REMOTE FEED // CONNECTED</div>
+            </div>
+            <div class="context-bar">
+                <input type="text" class="context-input" id="remote-id-input" placeholder="ENTER TRANSMITTER ID">
+                <button class="context-btn" onclick="connectToPeer()">LINK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal">
+        <div class="modal-content">
+            <div class="modal-text" id="modal-text"></div>
+            <button class="context-btn" onclick="closeModal()">ACK</button>
+        </div>
+    </div>
+
+    <script>
+        let peer = null;
+        let localStream = null;
+        let currentRole = null;
+
+        setTimeout(() => {
+            document.getElementById('boot-screen').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+        }, 2000);
+
+        function showModal(text) {
+            document.getElementById('modal-text').innerText = text;
+            document.getElementById('modal').style.display = 'flex';
+        }
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+        }
+
+        function updateStatus(status) {
+            const dot = document.getElementById('conn-dot');
+            const text = document.getElementById('conn-text');
+            if (status === 'online') {
+                dot.classList.add('active');
+                text.innerText = 'ONLINE';
+            } else if (status === 'connected') {
+                dot.classList.add('active');
+                text.innerText = 'LINKED';
+            } else {
+                dot.classList.remove('active');
+                text.innerText = 'OFFLINE';
+            }
+        }
+
+        function initRole(role) {
+            currentRole = role;
+            document.getElementById('role-selector').style.display = 'none';
+            
+            if (role === 'transmit') {
+                document.getElementById('transmit-view').classList.add('active');
+                startTransmission();
+            } else {
+                document.getElementById('receive-view').classList.add('active');
+                startReceiver();
+            }
+        }
+
+        function startTransmission() {
+            navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: { exact: "environment" } }, 
+                audio: false 
+            })
+            .then(stream => {
+                localStream = stream;
+                document.getElementById('local-video').srcObject = stream;
+                
+                peer = new Peer();
+                peer.on('open', (id) => {
+                    document.getElementById('my-id-tx').innerText = id;
+                    updateStatus('online');
+                });
+
+                peer.on('call', (call) => {
+                    call.answer(localStream);
+                    updateStatus('connected');
+                });
+
+                peer.on('error', (err) => {
+                    showModal("PEER ERROR: " + err.type);
+                    console.error(err);
+                });
+            })
+            .catch(err => {
+                showModal("CAMERA ACCESS DENIED. CHECK PERMISSIONS.");
+                console.error(err);
+            });
+        }
+
+        function startReceiver() {
+            peer = new Peer();
+            peer.on('open', (id) => {
+                updateStatus('online');
+            });
+            peer.on('error', (err) => {
+                showModal("PEER ERROR: " + err.type);
+                console.error(err);
+            });
+        }
+
+        function connectToPeer() {
+            const remoteId = document.getElementById('remote-id-input').value.trim();
+            if (!remoteId || !peer) return;
+
+            const emptyStream = document.createElement('canvas').captureStream(0);
+            
+            const call = peer.call(remoteId, emptyStream);
+            
+            call.on('stream', (remoteStream) => {
+                document.getElementById('remote-video').srcObject = remoteStream;
+                document.getElementById('remote-hud').style.display = 'block';
+                updateStatus('connected');
+            });
+
+            call.on('error', (err) => {
+                showModal("STREAM FAILED. VERIFY ID AND NETWORK.");
+                console.error(err);
+            });
+        }
+
+        function copyId() {
+            const idText = document.getElementById('my-id-tx').innerText;
+            if (idText !== 'FETCHING ID...') {
+                navigator.clipboard.writeText(idText).then(() => {
+                    showModal("TRANSMITTER ID COPIED TO CLIPBOARD.");
+                });
+            }
+        }
+
+        if ('wakeLock' in navigator) {
+            navigator.wakeLock.request('screen').catch(e => console.log("Wake lock failed"));
+        }
+    </script>
+</body>
+</html>
