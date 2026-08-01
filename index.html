@@ -184,7 +184,7 @@
             border: 1px solid var(--border);
             padding: 10px 20px;
             display: flex;
-            gap: 20px;
+            gap: 15px;
             align-items: center;
             clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
             z-index: 10;
@@ -196,10 +196,12 @@
             color: var(--text);
             font-family: 'JetBrains Mono', monospace;
             font-size: 12px;
-            width: 180px;
+            width: 120px;
             outline: none;
             border-bottom: 1px solid var(--border);
             padding-bottom: 2px;
+            text-align: center;
+            text-transform: uppercase;
         }
 
         .context-btn {
@@ -219,11 +221,13 @@
         }
 
         .peer-id-display {
-            font-size: 12px;
+            font-size: 14px;
+            font-weight: 700;
             color: var(--text);
             cursor: pointer;
             border: 1px dashed var(--muted);
             padding: 6px 12px;
+            letter-spacing: 2px;
         }
 
         #modal {
@@ -285,7 +289,8 @@
                 <div class="video-hud">CAM-01 // LIVE</div>
             </div>
             <div class="context-bar">
-                <div class="peer-id-display" id="my-id-tx" onclick="copyId()">FETCHING ID...</div>
+                <div class="peer-id-display" id="my-id-tx" onclick="copyId()">...</div>
+                <button class="context-btn" onclick="switchCamera()">FLIP</button>
             </div>
         </div>
 
@@ -295,7 +300,7 @@
                 <div class="video-hud" id="remote-hud" style="display:none;">REMOTE FEED // CONNECTED</div>
             </div>
             <div class="context-bar">
-                <input type="text" class="context-input" id="remote-id-input" placeholder="ENTER TRANSMITTER ID">
+                <input type="text" class="context-input" id="remote-id-input" placeholder="ENTER ID" maxlength="6">
                 <button class="context-btn" onclick="connectToPeer()">LINK</button>
             </div>
         </div>
@@ -312,6 +317,8 @@
         let peer = null;
         let localStream = null;
         let currentRole = null;
+        let currentFacingMode = 'user';
+        let currentCall = null;
 
         setTimeout(() => {
             document.getElementById('boot-screen').style.display = 'none';
@@ -341,6 +348,10 @@
             }
         }
 
+        function generateShortId() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+        }
+
         function initRole(role) {
             currentRole = role;
             document.getElementById('role-selector').style.display = 'none';
@@ -356,31 +367,65 @@
 
         function startTransmission() {
             navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: { exact: "environment" } }, 
+                video: { facingMode: currentFacingMode }, 
                 audio: false 
             })
             .then(stream => {
                 localStream = stream;
                 document.getElementById('local-video').srcObject = stream;
                 
-                peer = new Peer();
+                const customId = generateShortId();
+                peer = new Peer(customId);
+                
                 peer.on('open', (id) => {
                     document.getElementById('my-id-tx').innerText = id;
                     updateStatus('online');
                 });
 
                 peer.on('call', (call) => {
+                    currentCall = call;
                     call.answer(localStream);
                     updateStatus('connected');
                 });
 
                 peer.on('error', (err) => {
-                    showModal("PEER ERROR: " + err.type);
+                    if (err.type === 'unavailable-id') {
+                        showModal("ID COLLISION. RESTARTING.");
+                        peer.destroy();
+                        startTransmission();
+                    } else {
+                        showModal("PEER ERROR: " + err.type);
+                    }
                     console.error(err);
                 });
             })
             .catch(err => {
                 showModal("CAMERA ACCESS DENIED. CHECK PERMISSIONS.");
+                console.error(err);
+            });
+        }
+
+        function switchCamera() {
+            if (!localStream) return;
+            currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+            
+            localStream.getTracks().forEach(track => track.stop());
+            
+            navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: currentFacingMode }, 
+                audio: false 
+            })
+            .then(stream => {
+                localStream = stream;
+                document.getElementById('local-video').srcObject = stream;
+                
+                if (currentCall) {
+                    const sender = currentCall.peerConnection.getSenders().find(s => s.track.kind === 'video');
+                    if (sender) sender.replaceTrack(stream.getVideoTracks()[0]);
+                }
+            })
+            .catch(err => {
+                showModal("CAMERA SWITCH FAILED.");
                 console.error(err);
             });
         }
@@ -397,7 +442,7 @@
         }
 
         function connectToPeer() {
-            const remoteId = document.getElementById('remote-id-input').value.trim();
+            const remoteId = document.getElementById('remote-id-input').value.trim().toUpperCase();
             if (!remoteId || !peer) return;
 
             const emptyStream = document.createElement('canvas').captureStream(0);
@@ -418,11 +463,9 @@
 
         function copyId() {
             const idText = document.getElementById('my-id-tx').innerText;
-            if (idText !== 'FETCHING ID...') {
-                navigator.clipboard.writeText(idText).then(() => {
-                    showModal("TRANSMITTER ID COPIED TO CLIPBOARD.");
-                });
-            }
+            navigator.clipboard.writeText(idText).then(() => {
+                showModal("ID COPIED TO CLIPBOARD.");
+            });
         }
 
         if ('wakeLock' in navigator) {
